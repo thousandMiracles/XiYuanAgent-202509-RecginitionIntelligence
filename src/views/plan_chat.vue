@@ -154,15 +154,15 @@
         
         <div class="map-content">
           <!-- 模拟地图区域 -->
-          <div class="mock-map" :class="mapType">
+          <!-- <div class="mock-map" :class="mapType">
             <div class="map-overlay">
               <div class="destination-marker" v-if="searchData.destination">
                 <div class="marker-icon">📍</div>
                 <div class="marker-label">{{ searchData.destination }}</div>
-              </div>
+              </div> -->
               
               <!-- 模拟路线 -->
-              <div class="travel-route" v-if="searchData.destination">
+              <!-- <div class="travel-route" v-if="searchData.destination">
                 <div class="route-line"></div>
                 <div class="route-points">
                   <div class="route-point start">起点</div>
@@ -170,7 +170,8 @@
                 </div>
               </div>
             </div>
-          </div>
+          </div> -->
+          <div id="amap" style="width:100%; height:100%;"></div>
           
           <!-- 地图信息面板 -->
           <div class="map-info">
@@ -212,6 +213,7 @@
 </template>
 
 <script setup>
+// src="https://webapi.amap.com/maps?v=2.0&key=fb4bd91cb9a48d50b19a6787aa081ec9"
 import { ref, onMounted, nextTick, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -230,11 +232,13 @@ const userInput = ref('')
 const messages = ref([])
 const isTyping = ref(false)
 const chatMessages = ref(null)
+const sessionId = ref(null)
 
 // 侧边栏控制
 const sidebarCollapsed = ref(false)
 
 // 地图相关数据
+const map = ref(null)
 const mapType = ref('standard')
 const weatherInfo = ref(null)
 
@@ -271,41 +275,87 @@ const generateAIResponse = (userMessage) => {
 // 发送消息
 const sendMessage = async () => {
   if (!userInput.value.trim()) return
-  
+
   const userMessage = {
     id: Date.now(),
     type: 'user',
     text: userInput.value,
     time: new Date().toLocaleTimeString()
   }
-  
+
   messages.value.push(userMessage)
+  const messageToSend = userInput.value
   userInput.value = ''
-  
+
   // 显示AI正在输入
   isTyping.value = true
-  
+
   // 滚动到底部
   await nextTick()
   scrollToBottom()
-  
-  // 模拟AI回复延迟
-  setTimeout(() => {
+
+  try {
+    // 调用后端API
+    const response = await fetch('http://localhost:8000/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        session_id: sessionId.value,
+        message: messageToSend
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error('Network response was not ok')
+    }
+
+    const data = await response.json()
+
+    // 更新session_id
+    sessionId.value = data.session_id
+
+    // 更新旅行信息
+    if (data.travel_info) {
+      searchData.value = {
+        destination: data.travel_info.destination || '',
+        startDate: data.travel_info.start_date || '',
+        endDate: data.travel_info.end_date || '',
+        people: data.travel_info.num_people ? String(data.travel_info.num_people) : ''
+      }
+    }
+
     isTyping.value = false
-    
+
     const aiMessage = {
       id: Date.now() + 1,
       type: 'ai',
-      text: generateAIResponse(userMessage.text),
+      text: data.response,
       time: new Date().toLocaleTimeString()
     }
-    
+
     messages.value.push(aiMessage)
-    
-    nextTick(() => {
-      scrollToBottom()
-    })
-  }, 1500)
+
+    await nextTick()
+    scrollToBottom()
+
+  } catch (error) {
+    console.error('Error sending message:', error)
+    isTyping.value = false
+
+    const errorMessage = {
+      id: Date.now() + 1,
+      type: 'ai',
+      text: '抱歉，发送消息时出现错误，请稍后再试。',
+      time: new Date().toLocaleTimeString()
+    }
+
+    messages.value.push(errorMessage)
+
+    await nextTick()
+    scrollToBottom()
+  }
 }
 
 // 滚动到底部
@@ -346,6 +396,40 @@ const toggleSidebar = () => {
 }
 
 // 切换地图类型
+// This function is used to specify current location
+const locateCur = async() => {
+    if(!navigator.geolocation){
+      console.warn("Your Browser does not support locating!");
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(async(pos) => {
+        const userPos = [pos.coords.longitude, pos.coords.latitude];
+        console.log("用户当前位置：", userPos);
+        resolve(userPos);
+      }),
+      (err) =>{
+        console.warn("定位失败", err);
+        reject(err);
+      }
+    })
+  }
+const initMap = async() => {
+      map.value = new AMap.Map('amap', {
+        zoom: 14
+      });
+      const userPos = await locateCur();
+
+      const userMarker = new AMap.Marker({
+        map: map.value,
+        position: userPos,
+        title: "当前位置"
+      })
+
+      map.value.setCenter(userMarker.getPosition());
+
+  }
 const toggleMapType = () => {
   mapType.value = mapType.value === 'standard' ? 'satellite' : 'standard'
 }
@@ -370,6 +454,7 @@ const generateWeatherInfo = () => {
 // 组件挂载时获取搜索参数
 onMounted(() => {
   // 从URL参数或localStorage获取搜索数据
+  initMap()
   const urlParams = new URLSearchParams(window.location.search)
   searchData.value = {
     destination: urlParams.get('destination') || localStorage.getItem('searchDestination') || '',
@@ -395,6 +480,9 @@ onMounted(() => {
     scrollToBottom()
   })
 })
+
+
+
 </script>
 
 <style scoped>
