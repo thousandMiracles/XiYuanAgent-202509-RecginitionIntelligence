@@ -5,9 +5,9 @@ from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from base import TravelInfo
+from ..base import TravelInfo
 
-os.environ["KIMI_API_KEY"] = "your API KEY"
+# 不在此处硬编码/覆盖 API Key，改为由调用方传入或环境变量提供
 
 
 class ExtractedInfo(BaseModel):
@@ -80,6 +80,11 @@ class TravelInfoAgent:
 3. 用友好、自然的方式询问缺失的信息（一次询问1-2个相关问题）
 4. 如果用户提供了新信息，要确认理解并继续询问其他缺失信息
 5. 当所有必要信息收集完成后，总结所有信息并询问用户是否确认
+
+重要约束：
+- 若上下文中明确某个字段“已确认”（如：✓ 目的地已确认），不要再次询问、要求更换或细化该字段；
+- 特别是目的地已确认后，不要再追问“更具体的地点/更精确位置”等，除非用户主动表达要修改或补充；
+- 切勿擅自修改已确认的字段值，除非用户明确提出变更。
 
 注意：
 - 日期格式要转换为YYYY-MM-DD格式
@@ -159,6 +164,12 @@ class TravelInfoAgent:
 
         if current_info.destination:
             context_parts.append(f"- 目的地：{current_info.destination}")
+            # 若目的地已确认，提示模型不要重复确认
+            try:
+                if getattr(current_info, 'destination_confirmed', False):
+                    context_parts.append("✓ 目的地已确认，请不要再次询问或要求用户确认目的地")
+            except Exception:
+                pass
         if current_info.start_date:
             context_parts.append(f"- 开始日期：{current_info.start_date}")
         if current_info.end_date:
@@ -200,10 +211,20 @@ class TravelInfoAgent:
         # 创建新的信息对象，保留旧信息
         updated_data = current_info.model_dump()
 
-        # 更新提取到的新信息（只更新非空值）
+        # 更新提取到的新信息（只更新非空值）——但不覆盖已确认的字段
+        dest_confirmed = False
+        try:
+            dest_confirmed = bool(getattr(current_info, 'destination_confirmed', False))
+        except Exception:
+            dest_confirmed = False
+
         for key, value in extracted_info.items():
-            if value is not None and value != "":
-                updated_data[key] = value
+            if value is None or value == "":
+                continue
+            if key == 'destination' and dest_confirmed:
+                # 已确认目的地不允许被覆盖
+                continue
+            updated_data[key] = value
 
         return TravelInfo(**updated_data)
 

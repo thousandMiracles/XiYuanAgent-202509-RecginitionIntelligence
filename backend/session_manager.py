@@ -1,6 +1,6 @@
 import uuid
 from typing import Dict
-from base import TravelInfo, ChatSession
+from .base import TravelInfo, ChatSession
 
 
 class SessionManager:

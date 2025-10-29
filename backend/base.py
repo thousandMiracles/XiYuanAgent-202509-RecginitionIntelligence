@@ -12,6 +12,7 @@ class POI(BaseModel):
 class TravelInfo(BaseModel):
     """旅行信息模型"""
     destination: Optional[str] = None  # 目的地
+    destination_confirmed: Optional[bool] = False  # 目的地是否已确认
     start_date: Optional[str] = None  # 开始日期
     end_date: Optional[str] = None  # 结束日期
     num_people: Optional[int] = None  # 人数

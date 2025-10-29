@@ -1,5 +1,25 @@
 <template>
+ 
   <div class="plan-chat-container">
+    <!-- 目的地补全确认弹窗 -->
+    <div v-if="destConfirm.visible" class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-header">确认目的地</div>
+        <div class="modal-body">
+          <div class="modal-row"><strong>原始输入：</strong><span>{{ destConfirm.raw }}</span></div>
+          <div class="modal-row"><strong>请选择标准名称：</strong></div>
+          <div class="modal-options">
+            <label class="option" v-for="opt in [destConfirm.suggestion, ...destConfirm.alternatives]" :key="opt">
+              <input type="radio" name="destOpt" :value="opt" v-model="destConfirm.selected" />
+              <span>{{ opt }}</span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn confirm" @click="destConfirmConfirm">确认使用</button>
+        </div>
+      </div>
+    </div>
     <!-- 可收起的侧边栏 -->
     <div class="collapsible-sidebar" :class="{ 'collapsed': sidebarCollapsed }">
       <!-- 收起/展开按钮 -->
@@ -80,12 +100,12 @@
       </div>
     </div>
 
-    <!-- 左侧面板 - 40% (原来的右侧面板) -->
+    <!-- 左侧面板 - 40%  -->
     <div class="left-panel">
       <!-- 聊天消息区域 -->
       <div class="chat-messages" ref="chatMessages">
         <div 
-          v-for="message in messages" 
+          v-for="(message, idx) in messages" 
           :key="message.id"
           :class="['message', message.type]"
         >
@@ -95,11 +115,7 @@
             </div>
             <div class="message-text">{{ message.text }}</div>
             <div v-if="message.type === 'ai'" class="message-actions">
-              <button class="action-icon">👍</button>
-              <button class="action-icon">👎</button>
-              <button class="action-icon">📋</button>
-              <button class="action-icon">⋯</button>
-              <button class="regenerate-btn">Regenerate</button>
+              <button class="regenerate-btn" @click="regenerate(idx)">Regenerate</button>
             </div>
           </div>
         </div>
@@ -145,53 +161,61 @@
               <span class="control-icon">🗺️</span>
               {{ mapType === 'satellite' ? '卫星' : '标准' }}
             </button>
-            <button class="control-btn" @click="centerMap">
-              <span class="control-icon">📍</span>
-              定位
+            
+            <!-- 起点输入（左侧） -->
+            <input 
+              class="control-input" 
+              v-model="startKeyword" 
+              placeholder="请输入起点（所在位置）" />
+            
+            <!-- 目的地输入（右侧） -->
+            <input 
+              class="control-input" 
+              v-model="searchData.destination" 
+              placeholder="请输入目的地（例如：外滩）" />
+            <button class="control-btn" @click="planRoute" :disabled="!startKeyword || !searchData.destination">
+              <span class="control-icon">🧭</span>
+              路线规划
+            </button>
+            <button class="control-btn" @click="openInAmap">
+              <span class="control-icon">↗️</span>
+              高德中打开
             </button>
           </div>
         </div>
         
         <div class="map-content">
-          <!-- 模拟地图区域 -->
-          <!-- <div class="mock-map" :class="mapType">
-            <div class="map-overlay">
-              <div class="destination-marker" v-if="searchData.destination">
-                <div class="marker-icon">📍</div>
-                <div class="marker-label">{{ searchData.destination }}</div>
-              </div> -->
-              
-              <!-- 模拟路线 -->
-              <!-- <div class="travel-route" v-if="searchData.destination">
-                <div class="route-line"></div>
-                <div class="route-points">
-                  <div class="route-point start">起点</div>
-                  <div class="route-point end">{{ searchData.destination }}</div>
-                </div>
-              </div>
+          <!-- 高德地图容器 -->
+          <div id="amap-container" class="amap-container">
+            <div v-if="isRouteLoading" class="route-loading-mask">
+              <div class="route-loading-text">{{ routeLoadingMsg || '正在加载...' }}</div>
             </div>
-          </div> -->
-          <div id="amap" style="width:100%; height:100%;"></div>
+          </div>
           
           <!-- 地图信息面板 -->
           <div class="map-info">
             <div class="info-card">
-              <h3>目的地信息</h3>
-              <div class="info-item">
-                <span class="info-label">地点：</span>
-                <span class="info-value">{{ searchData.destination || '未选择' }}</span>
+              <div class="card-header" @click="infoCollapsed = !infoCollapsed">
+                <h3>目的地信息</h3>
+                <button type="button" class="card-toggle">{{ infoCollapsed ? '▼' : '▲' }}</button>
               </div>
-              <div class="info-item">
-                <span class="info-label">出发日期：</span>
-                <span class="info-value">{{ searchData.startDate || '未选择' }}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">返回日期：</span>
-                <span class="info-value">{{ searchData.endDate || '未选择' }}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">人数：</span>
-                <span class="info-value">{{ searchData.people || '未选择' }}</span>
+              <div class="card-body" v-show="!infoCollapsed">
+                <div class="info-item">
+                  <span class="info-label">地点：</span>
+                  <span class="info-value">{{ searchData.destination || '未选择' }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">出发日期：</span>
+                  <span class="info-value">{{ searchData.startDate || '未选择' }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">返回日期：</span>
+                  <span class="info-value">{{ searchData.endDate || '未选择' }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">人数：</span>
+                  <span class="info-value">{{ searchData.people || '未选择' }}</span>
+                </div>
               </div>
             </div>
             
@@ -213,8 +237,7 @@
 </template>
 
 <script setup>
-// src="https://webapi.amap.com/maps?v=2.0&key=fb4bd91cb9a48d50b19a6787aa081ec9"
-import { ref, onMounted, nextTick, onUnmounted } from 'vue'
+import { ref, onMounted, nextTick, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -232,15 +255,57 @@ const userInput = ref('')
 const messages = ref([])
 const isTyping = ref(false)
 const chatMessages = ref(null)
+// 会话ID（由后端返回并在后续请求中复用）
 const sessionId = ref(null)
 
 // 侧边栏控制
 const sidebarCollapsed = ref(false)
 
 // 地图相关数据
-const map = ref(null)
 const mapType = ref('standard')
 const weatherInfo = ref(null)
+let map = null // 高德地图实例
+let satelliteLayer = null // 卫星图层
+let roadNetLayer = null // 路网图层
+// 路线规划相关
+const routeSummary = ref(null)
+let routePolyline = null
+let userMarker = null
+let destMarker = null
+// 起点输入/定位来源
+const startKeyword = ref('')
+// 路线规划加载状态
+const isRouteLoading = ref(false)
+const routeLoadingMsg = ref('')
+// 最近一次成功规划用到的起终点坐标
+const lastStart = ref(null) // {lng, lat, name}
+const lastEnd = ref(null)   // {lng, lat, name}
+// 终点附近 POI 与次级路线
+let foodMarkers = []
+let hotelMarkers = []
+let poiDriving = null
+let poiInfoWindow = null
+let poiHoverInfoWindow = null
+// 主路线驾车实例（用于清除旧路线）
+let mainDriving = null
+// 已移除定位来源状态
+
+// 目的地补全确认弹窗状态
+const destConfirm = ref({
+  visible: false,
+  raw: '',
+  suggestion: '',
+  alternatives: [],
+  selected: ''
+})
+
+// 弹窗Promise的resolve持有者与一次性自动规划标记
+let destConfirmResolve = null
+let plannedByConfirmOnce = false
+
+// 本地仅确认一次的开关与记录
+const destConfirmedOnce = ref(false)
+const confirmedDestValue = ref('')
 
 // 对话历史相关数据
 const currentConversationId = ref(1)
@@ -259,6 +324,9 @@ const recentConversations = ref([
   { id: 9, title: 'Operator Grammar Types' },
   { id: 10, title: 'Min States For Binary DFA' }
 ])
+
+// 目的地信息折叠状态
+const infoCollapsed = ref(true)
 
 // 模拟AI回复
 const generateAIResponse = (userMessage) => {
@@ -313,17 +381,63 @@ const sendMessage = async () => {
 
     const data = await response.json()
 
-    // 更新session_id
-    sessionId.value = data.session_id
+  // 更新session_id
+  sessionId.value = data.session_id
+  try { localStorage.setItem('sessionId', sessionId.value) } catch (e) {}
 
-    // 更新旅行信息
+    // 智能同步目的地、日期、人数到地图输入框（仅覆盖空值或与上次同步一致时，避免覆盖用户手动输入）
     if (data.travel_info) {
-      searchData.value = {
-        destination: data.travel_info.destination || '',
-        startDate: data.travel_info.start_date || '',
-        endDate: data.travel_info.end_date || '',
-        people: data.travel_info.num_people ? String(data.travel_info.num_people) : ''
+      const ti = data.travel_info
+      let extractedDest = ti.destination || ''
+      // 若有目的地，先走Kimi补全确认流程（仅确认一次：后续请求不再弹窗）
+      if (extractedDest && !destConfirmedOnce.value) {
+        try {
+          const confirmed = await normalizeAndConfirmDestination(extractedDest)
+          if (confirmed) {
+            searchData.value.destination = confirmed
+            localStorage.setItem('searchDestination', confirmed)
+            destConfirmedOnce.value = true
+            confirmedDestValue.value = confirmed
+          } else {
+            // 用户取消或未确认：不写入目的地
+            console.log('[normalize] 用户未确认目的地，保持为空')
+          }
+        } catch (e) {
+          console.warn('[normalize] 目的地补全失败，使用原值', extractedDest, e)
+          // 兜底：使用原值
+          searchData.value.destination = extractedDest
+          localStorage.setItem('searchDestination', extractedDest)
+          destConfirmedOnce.value = true
+          confirmedDestValue.value = extractedDest
+        }
       }
+      // 出发日期
+      if (ti.start_date && (!searchData.value.startDate || searchData.value.startDate === localStorage.getItem('searchStartDate'))) {
+        searchData.value.startDate = ti.start_date
+        localStorage.setItem('searchStartDate', ti.start_date)
+      }
+      // 结束日期
+      if (ti.end_date && (!searchData.value.endDate || searchData.value.endDate === localStorage.getItem('searchEndDate'))) {
+        searchData.value.endDate = ti.end_date
+        localStorage.setItem('searchEndDate', ti.end_date)
+      }
+      // 人数
+      if (ti.num_people && (!searchData.value.people || searchData.value.people === localStorage.getItem('searchPeople'))) {
+        searchData.value.people = String(ti.num_people)
+        localStorage.setItem('searchPeople', String(ti.num_people))
+      }
+      // 对话结束后，若起点和目的地都存在，立即自动路径规划
+      nextTick(() => {
+        if (startKeyword.value && searchData.value.destination) {
+          // 若已在确认弹窗中写入过目的地，避免重复触发
+          if (plannedByConfirmOnce) {
+            plannedByConfirmOnce = false
+            return
+          }
+          console.log('[autoPlan] sendMessage后立即自动触发 planRoute', startKeyword.value, searchData.value.destination)
+          planRoute()
+        }
+      })
     }
 
     isTyping.value = false
@@ -355,6 +469,53 @@ const sendMessage = async () => {
 
     await nextTick()
     scrollToBottom()
+  }
+}
+
+// 重新生成指定 AI 消息的回复（尝试给出不同回答）
+const regenerate = async (aiIndex) => {
+  try {
+    // 找到对应的 AI 消息前最近的用户消息文本
+    let i = aiIndex - 1
+    let userMsg = null
+    while (i >= 0) {
+      if (messages.value[i].type === 'user') {
+        userMsg = messages.value[i].text
+        break
+      }
+      i--
+    }
+    if (!userMsg) {
+      console.warn('[regenerate] 未找到对应的用户消息')
+      return
+    }
+
+    isTyping.value = true
+    // 在原消息后附加提示，要求模型给出不同的回答
+    const regenPrompt = userMsg + '\n请基于上面的用户问题，给出一个不同于之前回答的替代回复（换一种措辞或思路），不要重复原有回答。'
+
+    const response = await fetch('http://localhost:8000/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId.value, message: regenPrompt })
+    })
+
+    if (!response.ok) {
+      throw new Error('Network response was not ok')
+    }
+
+    const data = await response.json()
+    // 替换指定 AI 消息的文本为新的回复（不改变会话的其它 UI 状态）
+    if (data && data.response) {
+      // 确保索引仍然有效
+      if (messages.value[aiIndex] && messages.value[aiIndex].type === 'ai') {
+        messages.value[aiIndex].text = data.response
+      }
+    }
+    isTyping.value = false
+  } catch (e) {
+    console.error('[regenerate] error', e)
+    isTyping.value = false
   }
 }
 
@@ -395,77 +556,427 @@ const toggleSidebar = () => {
   sidebarCollapsed.value = !sidebarCollapsed.value
 }
 
+// 加载高德地图 SDK
+const loadAmapScript = () => {
+  return new Promise((resolve) => {
+    if (window.AMap && window.AMap.Map) return resolve(window.AMap)
+    const key = import.meta.env.VITE_AMAP_KEY
+    const secret = import.meta.env.VITE_AMAP_SECRET
+    window._AMapSecurityConfig = { securityJsCode: secret }
+    const script = document.createElement('script')
+    script.src = `https://webapi.amap.com/maps?v=2.0&key=${key}`
+    script.type = 'text/javascript'
+    script.onload = () => resolve(window.AMap)
+    document.head.appendChild(script)
+  })
+}
+
+// 初始化地图
+const initMap = async () => {
+  const AMap = await loadAmapScript()
+  map = new AMap.Map('amap-container', {
+    viewMode: '3D',
+    zoom: 11,
+    center: [121.4737, 31.2304]
+  })
+  satelliteLayer = new AMap.TileLayer.Satellite()
+  roadNetLayer = new AMap.TileLayer.RoadNet()
+}
+
 // 切换地图类型
-// This function is used to specify current location
-const locateCur = async() => {
-    if(!navigator.geolocation){
-      console.warn("Your Browser does not support locating!");
-      return;
-    }
-
-    return new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(async(pos) => {
-        const userPos = [pos.coords.longitude, pos.coords.latitude];
-        console.log("用户当前位置：", userPos);
-        resolve(userPos);
-      }),
-      (err) =>{
-        console.warn("定位失败", err);
-        reject(err);
-      }
-    })
-  }
-const initMap = async() => {
-      map.value = new AMap.Map('amap', {
-        zoom: 14
-      });
-      const userPos = await locateCur();
-
-      const userMarker = new AMap.Marker({
-        map: map.value,
-        position: userPos,
-        title: "当前位置"
-      })
-
-      map.value.setCenter(userMarker.getPosition());
-
-  }
 const toggleMapType = () => {
   mapType.value = mapType.value === 'standard' ? 'satellite' : 'standard'
+  
+  if (!map) return
+  
+  if (mapType.value === 'satellite') {
+    // 切换到卫星图
+    map.add(satelliteLayer)
+    map.add(roadNetLayer)
+  } else {
+    // 切换回标准图
+    map.remove(satelliteLayer)
+    map.remove(roadNetLayer)
+  }
 }
 
-// 定位地图
-const centerMap = () => {
-  // 模拟定位功能
-  console.log('定位到当前位置')
+// 调用后端：Kimi 补全目的地
+const normalizeDestination = async (rawName, cityHint = '') => {
+  const resp = await fetch('http://localhost:8000/api/normalize_destination', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: rawName, city_hint: cityHint })
+  })
+  if (!resp.ok) throw new Error('normalize api failed')
+  const data = await resp.json()
+  return data // { raw, suggestion, alternatives }
 }
 
-// 模拟天气信息
-const generateWeatherInfo = () => {
-  const weatherData = [
-    { icon: '☀️', temperature: '25', condition: '晴朗' },
-    { icon: '⛅', temperature: '22', condition: '多云' },
-    { icon: '🌧️', temperature: '18', condition: '小雨' },
-    { icon: '❄️', temperature: '5', condition: '雪' }
-  ]
-  return weatherData[Math.floor(Math.random() * weatherData.length)]
+// 打开目的地确认弹窗，返回最终确认的名称或空
+const normalizeAndConfirmDestination = async (rawName) => {
+  try {
+    const cityHint = '' // 可选：根据起点或已知上下文提供
+    const res = await normalizeDestination(rawName, cityHint)
+    const options = [res.suggestion, ...(res.alternatives || [])].filter(Boolean)
+    if (!options.length) return rawName
+    // 初始化弹窗状态
+    destConfirm.value.visible = true
+    destConfirm.value.raw = rawName
+    destConfirm.value.suggestion = res.suggestion
+    destConfirm.value.alternatives = res.alternatives || []
+    destConfirm.value.selected = res.suggestion
+    // 返回一个 Promise，等待用户确认/取消
+    return await new Promise((resolve) => {
+      destConfirmResolve = resolve
+    })
+  } catch (e) {
+    console.warn('[normalize] 调用补全失败', e)
+    return rawName
+  }
 }
+
+const closeConfirm = () => {
+  destConfirm.value.visible = false
+}
+
+const destConfirmConfirm = () => {
+  const v = destConfirm.value.selected || destConfirm.value.suggestion || destConfirm.value.raw
+  // 立即写入地图输入框
+  if (v) {
+    searchData.value.destination = v
+    try { localStorage.setItem('searchDestination', v) } catch (e) {}
+    // 将确认结果通知后端，避免大模型重复确认
+    try {
+      if (sessionId.value) {
+        fetch(`http://localhost:8000/api/session/${sessionId.value}/confirm_destination`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ destination: v })
+        }).catch(() => {})
+      }
+    } catch (e) {}
+  }
+  plannedByConfirmOnce = true
+  closeConfirm()
+  if (typeof destConfirmResolve === 'function') {
+    destConfirmResolve(v)
+  }
+  destConfirmResolve = null
+}
+
+// 取消按钮已移除：若需要恢复“更换补全方式”，可重新添加对应按钮并调用此逻辑
+
+
+// （保留此实现）关键字地理编码，带日志与 SDK 加载检查 + 超时
+const withTimeout = (p, ms) => {
+  let t
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error('timeout')), ms)
+  })
+  return Promise.race([p.finally(() => clearTimeout(t)), timeout])
+}
+
+// 清理地图上现有路线与叠加（在重新规划或用户修改起终点时调用）
+const clearAllRouteOverlays = () => {
+  try {
+    if (map && typeof map.clearMap === 'function') {
+      map.clearMap()
+    }
+  } catch (e) { /* ignore */ }
+  // 关闭信息窗
+  try { poiInfoWindow && poiInfoWindow.close() } catch (e) {}
+  try { poiHoverInfoWindow && poiHoverInfoWindow.close() } catch (e) {}
+  poiInfoWindow = null
+  poiHoverInfoWindow = null
+  // 清空 POI 驾车与标记缓存
+  try { poiDriving && typeof poiDriving.clear === 'function' && poiDriving.clear() } catch (e) {}
+  poiDriving = null
+  foodMarkers = []
+  hotelMarkers = []
+  // 清空主线路结果
+  try { mainDriving && typeof mainDriving.clear === 'function' && mainDriving.clear() } catch (e) {}
+  // 置空主标记引用（已从地图移除）
+  userMarker = null
+  destMarker = null
+}
+
+const geocode = (kw) => {
+  console.log('[geocode] Geocoding:', kw)
+  const task = new Promise((resolve, reject) => {
+    if (!kw) return reject(new Error('地址为空'))
+    if (!window.AMap) {
+      console.error('[geocode] window.AMap 未加载')
+      return reject(new Error('地图SDK未加载'))
+    }
+    window.AMap.plugin('AMap.Geocoder', () => {
+      const geocoder = new window.AMap.Geocoder()
+      geocoder.getLocation(kw, (status, result) => {
+        if (status === 'complete' && result && result.geocodes && result.geocodes.length) {
+          const loc = result.geocodes[0].location
+          console.log('[geocode] 解析成功:', kw, loc)
+          resolve([loc.lng, loc.lat])
+        } else {
+          console.error('[geocode] 解析失败:', kw, result)
+          reject(new Error('地理编码失败'))
+        }
+      })
+    })
+  })
+  return withTimeout(task, 8000)
+}
+
+// 规划驾车路线并渲染到地图（统一实现，含 loading 与日志）
+const planRoute = async () => {
+  console.log('[planRoute] called, startKeyword:', startKeyword.value, 'destination:', searchData.value.destination)
+  isRouteLoading.value = true
+  routeLoadingMsg.value = ''
+  try {
+    // 清空上一次的路线与叠加物
+    clearAllRouteOverlays()
+
+    const [startLng, startLat] = await geocode(startKeyword.value)
+    const destName = searchData.value.destination
+    if (!destName) {
+      isRouteLoading.value = false
+      routeLoadingMsg.value = ''
+      return alert('目的地为空')
+    }
+    const [endLng, endLat] = await geocode(destName)
+    if (userMarker) try { map && map.remove(userMarker) } catch(e) {}
+    if (destMarker) try { map && map.remove(destMarker) } catch(e) {}
+    userMarker = new AMap.Marker({ position: [startLng, startLat] })
+    destMarker = new AMap.Marker({ position: [endLng, endLat] })
+    map.add(userMarker)
+    map.add(destMarker)
+    // 缓存坐标
+    lastStart.value = { lng: startLng, lat: startLat, name: startKeyword.value || '起点' }
+    lastEnd.value = { lng: endLng, lat: endLat, name: destName || '终点' }
+    AMap.plugin('AMap.Driving', () => {
+      const panel = document.getElementById('driving-panel')
+      const opts = panel ? { map, panel: 'driving-panel' } : { map }
+      if (panel) panel.innerHTML = ''
+      // 清理上一次主线路并重新创建实例
+      try { mainDriving && typeof mainDriving.clear === 'function' && mainDriving.clear() } catch (e) {}
+      mainDriving = new AMap.Driving(opts)
+      const drivingSearch = new Promise((resolve) => {
+        mainDriving.search([startLng, startLat], [endLng, endLat], (status, result) => {
+          resolve({ status, result })
+        })
+      })
+      withTimeout(drivingSearch, 10000).then(({ status, result }) => {
+        isRouteLoading.value = false
+        routeLoadingMsg.value = ''
+        if (status === 'complete' && result && result.routes && result.routes.length) {
+          map.setFitView()
+          // 加载终点附近POI（美食/酒店）
+          loadNearbyPOIs()
+        } else {
+          alert('无路线')
+        }
+      }).catch(() => {
+        isRouteLoading.value = false
+        routeLoadingMsg.value = ''
+        alert('超时')
+      })
+    })
+  } catch (e) {
+    isRouteLoading.value = false
+    routeLoadingMsg.value = ''
+    alert('错误')
+  }
+}
+
+// 当用户修改起点或目的地时，立即清理现有路线，避免旧路线残留
+watch(() => searchData.value.destination, (val, oldVal) => {
+  if (val !== oldVal) {
+    clearAllRouteOverlays()
+    // 使下次 openInAmap 重新计算终点
+    lastEnd.value = null
+  }
+})
+
+watch(() => startKeyword.value, (val, oldVal) => {
+  if (val !== oldVal) {
+    clearAllRouteOverlays()
+    // 使下次 openInAmap 重新计算起点
+    lastStart.value = null
+  }
+})
+
+// 防抖定时器 + 自动路径规划：监听起点和目的地
+let autoPlanTimeout = null
+watch(
+  [() => startKeyword.value, () => searchData.value.destination],
+  ([start, dest], [oldStart, oldDest]) => {
+    console.log('[watch] startKeyword:', start, 'destination:', dest, '| old:', oldStart, oldDest)
+    if (start && dest && (start !== oldStart || dest !== oldDest)) {
+      if (autoPlanTimeout) clearTimeout(autoPlanTimeout)
+      autoPlanTimeout = setTimeout(() => {
+        console.log('[autoPlan] 自动触发 planRoute', start, dest)
+        planRoute()
+      }, 350)
+    }
+  }
+)
+
+// 在高德地图中打开完整路线
+const openInAmap = async () => {
+  try {
+    const destName = searchData.value.destination
+    if (!destName) return alert('目的地为空')
+    let s = lastStart.value
+    let e = lastEnd.value
+    if (!s) {
+      const [lng, lat] = await geocode(startKeyword.value)
+      s = { lng, lat, name: startKeyword.value || '起点' }
+    }
+    if (!e) {
+      const [lng, lat] = await geocode(destName)
+      e = { lng, lat, name: destName || '终点' }
+    }
+    const from = `${s.lng},${s.lat},${encodeURIComponent(s.name)}`
+    const to = `${e.lng},${e.lat},${encodeURIComponent(e.name)}`
+    const url = `https://uri.amap.com/navigation?from=${from}&to=${to}&mode=car&policy=1&coordinate=gaode&callnative=0`
+    window.open(url, '_blank')
+  } catch (e) {
+    alert('错误')
+  }
+}
+
+// 加载终点附近的美食与酒店
+const loadNearbyPOIs = () => {
+  if (!lastEnd.value || !map) return
+  const center = [lastEnd.value.lng, lastEnd.value.lat]
+  // 清理旧标记
+  clearPoiMarkers()
+  AMap.plugin('AMap.PlaceSearch', () => {
+    const common = { pageSize: 12, pageIndex: 1 }
+    const psFood = new AMap.PlaceSearch({ ...common })
+    const psHotel = new AMap.PlaceSearch({ ...common })
+    psFood.searchNearBy('美食', center, 2000, (status, result) => {
+      if (status === 'complete' && result && result.poiList && result.poiList.pois) {
+        addPoiMarkers(result.poiList.pois, 'food')
+      }
+    })
+    psHotel.searchNearBy('酒店', center, 2000, (status, result) => {
+      if (status === 'complete' && result && result.poiList && result.poiList.pois) {
+        addPoiMarkers(result.poiList.pois, 'hotel')
+      }
+    })
+  })
+}
+
+const clearPoiMarkers = () => {
+  if (foodMarkers.length) { map.remove(foodMarkers); foodMarkers = [] }
+  if (hotelMarkers.length) { map.remove(hotelMarkers); hotelMarkers = [] }
+}
+
+const addPoiMarkers = (pois, type) => {
+  pois.forEach(poi => {
+    if (!poi.location) return
+    const pos = [poi.location.lng, poi.location.lat]
+    const el = document.createElement('div')
+    el.className = `poi-marker ${type}`
+    el.innerText = type === 'food' ? '🍜' : '🏨'
+    const marker = new AMap.Marker({ position: pos, content: el, anchor: 'bottom-center' })
+    marker.setExtData({ type, name: poi.name || '', address: poi.address || '', position: pos })
+    // 悬浮显示名称
+    marker.on('mouseover', () => {
+      const data = marker.getExtData() || {}
+      if (!poiHoverInfoWindow) poiHoverInfoWindow = new AMap.InfoWindow({ isCustom: false, offset: new AMap.Pixel(0, -28) })
+      poiHoverInfoWindow.setContent(`<div class="poi-hover">${data.name || ''}</div>`)
+      poiHoverInfoWindow.open(map, pos)
+    })
+    marker.on('mouseout', () => {
+      if (poiHoverInfoWindow) poiHoverInfoWindow.close()
+    })
+    // 点击显示距离/时长并绘制路线
+    marker.on('click', () => onPoiClick(marker))
+    map.add(marker)
+    if (type === 'food') foodMarkers.push(marker); else hotelMarkers.push(marker)
+  })
+}
+
+const onPoiClick = (marker) => {
+  if (!lastEnd.value) return
+  // 避免与悬浮提示重叠
+  if (poiHoverInfoWindow) poiHoverInfoWindow.close()
+  const data = marker.getExtData() || {}
+  const start = [lastEnd.value.lng, lastEnd.value.lat]
+  const end = data.position
+  if (!poiDriving) {
+    poiDriving = new AMap.Driving({ map, hideMarkers: true, showTraffic: false, polylineOptions: { strokeColor: '#1e90ff', strokeWeight: 6, strokeOpacity: 0.8 } })
+  }
+  poiDriving.search(start, end, (status, result) => {
+    if (status === 'complete' && result && result.routes && result.routes.length) {
+      const r = result.routes[0]
+      const distKm = (r.distance / 1000).toFixed(1)
+      const mins = Math.round(r.time / 60)
+      if (!poiInfoWindow) poiInfoWindow = new AMap.InfoWindow({ offset: new AMap.Pixel(0, -28) })
+  poiInfoWindow.setContent(`<div class="poi-info"><div>${data.name || ''}</div><div>${distKm} km · ${mins} 分钟</div></div>`)
+      poiInfoWindow.open(map, end)
+    } else {
+      // 最简提示
+      alert('无路线')
+    }
+  })
+}
+
 
 // 组件挂载时获取搜索参数
-onMounted(() => {
-  // 从URL参数或localStorage获取搜索数据
-  initMap()
+onMounted(async () => {
+  // 页面刷新时清除localStorage中的目的地、日期、人数信息（保留 sessionId 用于连续会话）
+  localStorage.removeItem('searchDestination')
+  localStorage.removeItem('searchStartDate')
+  localStorage.removeItem('searchEndDate')
+  localStorage.removeItem('searchPeople')
+
+  // 恢复 sessionId（如存在）
+  const savedSessionId = localStorage.getItem('sessionId')
+  if (savedSessionId) {
+    sessionId.value = savedSessionId
+  }
+
+  // 从URL参数获取搜索数据（不再从localStorage恢复）
   const urlParams = new URLSearchParams(window.location.search)
   searchData.value = {
-    destination: urlParams.get('destination') || localStorage.getItem('searchDestination') || '',
-    startDate: urlParams.get('startDate') || localStorage.getItem('searchStartDate') || '',
-    endDate: urlParams.get('endDate') || localStorage.getItem('searchEndDate') || '',
-    people: urlParams.get('people') || localStorage.getItem('searchPeople') || ''
+    destination: urlParams.get('destination') || '',
+    startDate: urlParams.get('startDate') || '',
+    endDate: urlParams.get('endDate') || '',
+    people: urlParams.get('people') || ''
   }
-  
-  // 生成天气信息
-  weatherInfo.value = generateWeatherInfo()
-  
+
+  // 设置起点关键词：优先使用 Home 页填写的“所在区域”
+  const savedOrigin = urlParams.get('origin') || localStorage.getItem('searchOrigin')
+  if (savedOrigin && typeof savedOrigin === 'string') {
+    startKeyword.value = savedOrigin
+  }
+
+  // 确保高德地图SDK已加载
+  await loadAmapScript()
+  await nextTick()
+  let city = '上海'
+  window.AMap.plugin('AMap.Weather', function() {
+    const weather = new window.AMap.Weather()
+    weather.getLive(city, function(err, data) {
+      if (!err && data && data.weather) {
+        // 天气icon简单映射
+        let icon = '☀️'
+        if (data.weather.includes('雨')) icon = '🌧️'
+        else if (data.weather.includes('雪')) icon = '❄️'
+        else if (data.weather.includes('云')) icon = '⛅'
+        else if (data.weather.includes('阴')) icon = '☁️'
+        weatherInfo.value = {
+          icon,
+          temperature: data.temperature,
+          condition: data.weather
+        }
+      } else {
+        weatherInfo.value = { icon: '❓', temperature: '--', condition: '获取失败' }
+      }
+    })
+  })
+
   // 添加欢迎消息
   const welcomeMessage = {
     id: Date.now(),
@@ -473,16 +984,31 @@ onMounted(() => {
     text: `您好！我是您的AI旅行助手。我看到您计划去${searchData.value.destination || '某地'}旅行，从${searchData.value.startDate || '开始日期'}到${searchData.value.endDate || '结束日期'}，共${searchData.value.people || '？'}人。有什么我可以帮助您的吗？`,
     time: new Date().toLocaleTimeString()
   }
-  
+
   messages.value.push(welcomeMessage)
-  
-  nextTick(() => {
-    scrollToBottom()
-  })
+
+  await nextTick()
+  scrollToBottom()
+
+  // 确保 DOM 完全渲染后再初始化地图
+  setTimeout(() => {
+    initMap()
+  }, 100)
 })
 
-
-
+// 组件卸载时清理地图
+onUnmounted(() => {
+  if (map) {
+    map.destroy()
+    map = null
+  }
+  if (routePolyline && map) { map.remove(routePolyline) }
+  routePolyline = null
+  if (userMarker && map) { map.remove(userMarker) }
+  userMarker = null
+  if (destMarker && map) { map.remove(destMarker) }
+  destMarker = null
+})
 </script>
 
 <style scoped>
@@ -1013,99 +1539,12 @@ onMounted(() => {
   position: relative;
 }
 
-/* 模拟地图 */
-.mock-map {
+/* 高德地图容器 */
+.amap-container {
   flex: 1;
-  background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%);
-  position: relative;
-  overflow: hidden;
-}
-
-.mock-map.satellite {
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-}
-
-.map-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2rem;
-}
-
-.destination-marker {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  background: rgba(255, 255, 255, 0.9);
-  padding: 1rem;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  backdrop-filter: blur(10px);
-}
-
-.marker-icon {
-  font-size: 2rem;
-}
-
-.marker-label {
-  font-weight: 600;
-  color: #1f2937;
-  font-size: 1.1rem;
-}
-
-.travel-route {
-  position: relative;
-  width: 300px;
-  height: 100px;
-}
-
-.route-line {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, #4ade80, #22c55e);
-  border-radius: 2px;
-  transform: translateY(-50%);
-}
-
-.route-points {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.route-point {
-  background: #ffffff;
-  padding: 0.5rem 1rem;
-  border-radius: 20px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #1f2937;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.route-point.start {
-  background: #4ade80;
-  color: white;
-}
-
-.route-point.end {
-  background: #4ade80;
-  color: white;
+  width: 100%;
+  height: 100%;
+  min-height: 500px;
 }
 
 /* 地图信息面板 */
@@ -1117,16 +1556,42 @@ onMounted(() => {
   overflow-y: auto;
 }
 
-.info-card, .weather-card {
+.route-card {
   background: #f8f9fa;
   border-radius: 12px;
   padding: 1.5rem;
+  margin-top: 1rem;
+}
+.route-card h3 {
+  color: #1f2937;
+  font-size: 1.1rem;
+  margin: 0 0 1rem 0;
+}
+.route-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  color: #1f2937;
+}
+
+.driving-panel {
+  margin-top: 1rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.info-card, .weather-card {
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 1rem;
   margin-bottom: 1rem;
 }
 
 .info-card h3, .weather-card h3 {
   color: #1f2937;
-  font-size: 1.1rem;
+  font-size: 1rem;
   margin: 0 0 1rem 0;
 }
 
@@ -1151,11 +1616,11 @@ onMounted(() => {
 .weather-content {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .weather-icon {
-  font-size: 2.5rem;
+  font-size: 2rem;
 }
 
 .weather-details {
@@ -1163,16 +1628,41 @@ onMounted(() => {
 }
 
 .temperature {
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   font-weight: bold;
   color: #1f2937;
   margin-bottom: 0.25rem;
 }
 
 .condition {
-  color: #6b7280;
   font-size: 0.875rem;
+  color: #6b7280;
 }
+/* 卡片头部与折叠按钮 */
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+
+.card-toggle {
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #374151;
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.2s ease;
+}
+
+.card-body {
+  margin-top: 0.5rem;
+}
+
+/* 方向箭头通过字符控制，无需旋转类 */
 
 /* 响应式设计 */
 @media (max-width: 768px) {
@@ -1234,6 +1724,92 @@ onMounted(() => {
   .chat-input-area {
     padding: 1rem;
   }
+}
+</style>
+
+<style scoped>
+.route-loading-mask {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255,255,255,0.7);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.route-loading-text {
+  font-size: 1.2rem;
+  color: #22c55e;
+  background: #fff;
+  padding: 1.5rem 2.5rem;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(34,197,94,0.08);
+}
+/* 目的地确认弹窗样式 */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  width: 520px;
+  max-width: 90vw;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  overflow: hidden;
+}
+.modal-header {
+  padding: 16px 20px;
+  font-weight: 600;
+  border-bottom: 1px solid #eee;
+}
+.modal-body {
+  padding: 16px 20px;
+}
+.modal-row {
+  margin: 8px 0;
+}
+.modal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.option {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fafafa;
+}
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid #eee;
+}
+.btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+}
+.btn.cancel {
+  background: #f3f4f6;
+}
+.btn.confirm {
+  background: #4ade80;
+  color: #fff;
 }
 </style>
 

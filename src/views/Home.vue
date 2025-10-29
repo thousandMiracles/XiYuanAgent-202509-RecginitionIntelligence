@@ -36,10 +36,10 @@
         
         <!-- 搜索栏 -->
         <div class="search-container">
-          <div class="search-box">
+          <form class="search-box" @submit.prevent="handleSearch">
             <div class="search-field">
-              <span class="search-icon">📍</span>
-              <input type="text" placeholder="城市或目的地" v-model="searchData.destination" />
+              <span class="search-icon">🏠</span>
+              <input type="text" placeholder="所在区域（起点）" v-model="searchData.origin" />
             </div>
             <div class="search-field">
               <span class="search-icon">📅</span>
@@ -60,11 +60,11 @@
                 <option value="5+">5人以上</option>
               </select>
             </div>
-            <button class="search-btn" @click="handleSearch">
+            <button type="submit" class="search-btn">
               <span>立即查找行程</span>
               <span class="search-icon-btn">🔍</span>
             </button>
-          </div>
+          </form>
         </div>
       </div>
     </section>
@@ -79,6 +79,7 @@ const router = useRouter()
 
 // 搜索数据
 const searchData = ref({
+  origin: '',
   destination: '',
   startDate: '',
   endDate: '',
@@ -88,6 +89,7 @@ const searchData = ref({
 // 处理搜索
 const handleSearch = () => {
   // 保存搜索数据到localStorage
+  localStorage.setItem('searchOrigin', searchData.value.origin)
   localStorage.setItem('searchDestination', searchData.value.destination)
   localStorage.setItem('searchStartDate', searchData.value.startDate)
   localStorage.setItem('searchEndDate', searchData.value.endDate)
